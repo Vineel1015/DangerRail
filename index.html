@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DangerRail — Report Dangerous Guardrails</title>
+<style>
+  :root {
+    --danger: #d93025;
+    --dark: #1f2430;
+    --light: #f7f8fa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  header {
+    background: var(--dark);
+    color: #fff;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 10;
+    box-shadow: 0 2px 6px rgba(0,0,0,.25);
+  }
+  header .logo { font-size: 22px; }
+  header h1 { font-size: 17px; font-weight: 600; }
+  header p { font-size: 12px; opacity: .75; }
+  header .spacer { flex: 1; }
+
+  #reportBtn {
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    border-radius: 20px;
+    padding: 9px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  #reportBtn:hover { background: #b3241b; }
+  #reportBtn.active { background: #fff; color: var(--danger); }
+
+  #map { flex: 1; }
+
+  #banner {
+    position: absolute;
+    top: 68px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--danger);
+    color: #fff;
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    z-index: 9;
+    display: none;
+  }
+
+  /* Modal */
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    padding: 16px;
+  }
+  #overlay.open { display: flex; }
+  .modal {
+    background: #fff;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 420px;
+    padding: 22px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.3);
+  }
+  .modal h2 { font-size: 18px; margin-bottom: 4px; }
+  .modal .coords { font-size: 12px; color: #666; margin-bottom: 14px; }
+  .modal label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
+
+  #photoDrop {
+    border: 2px dashed #c3c8d0;
+    border-radius: 10px;
+    padding: 18px;
+    text-align: center;
+    font-size: 13px;
+    color: #666;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  #photoDrop:hover { border-color: var(--danger); }
+  #photoDrop img { max-width: 100%; max-height: 180px; border-radius: 8px; display: block; margin: 0 auto; }
+  #photoInput { display: none; }
+
+  .modal .actions { display: flex; gap: 10px; margin-top: 18px; justify-content: flex-end; }
+  .modal button {
+    border: none; border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  #cancelBtn { background: #eceef1; color: #333; }
+  #saveBtn { background: var(--danger); color: #fff; }
+  #saveBtn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* Info window content */
+  .iw { max-width: 260px; font-family: inherit; }
+  .iw img { width: 100%; border-radius: 8px; display: block; }
+  .iw .meta { font-size: 12px; color: #666; margin-top: 6px; }
+  .iw .title { font-size: 14px; font-weight: 600; color: var(--danger); margin-bottom: 6px; }
+
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--dark);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 30;
+    display: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  }
+
+  #configWarning {
+    position: fixed; inset: 0;
+    background: var(--light);
+    z-index: 40;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  #configWarning .box {
+    max-width: 520px;
+    background: #fff;
+    border: 1px solid #e3e6ea;
+    border-radius: 12px;
+    padding: 28px;
+    line-height: 1.5;
+  }
+  #configWarning code { background: #f1f3f5; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="logo">&#9888;&#65039;</span>
+    <div>
+      <h1>DangerRail</h1>
+      <p>Community map of dangerous guardrails</p>
+    </div>
+    <div class="spacer"></div>
+    <button id="reportBtn">+ Report a guardrail</button>
+  </header>
+  <div id="map"></div>
+</div>
+
+<div id="banner">Click the map at the guardrail's location</div>
+
+<div id="overlay">
+  <div class="modal">
+    <h2>Report dangerous guardrail</h2>
+    <div class="coords" id="modalCoords"></div>
+    <label>Photo of the guardrail</label>
+    <div id="photoDrop">Click to add a photo<br><span style="font-size:11px">(it will be compressed automatically)</span></div>
+    <input type="file" id="photoInput" accept="image/*" capture="environment" />
+    <div class="actions">
+      <button id="cancelBtn">Cancel</button>
+      <button id="saveBtn" disabled>Submit report</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div id="configWarning">
+  <div class="box">
+    <h2 style="margin-bottom:10px">&#9888;&#65039; Firebase not configured yet</h2>
+    <p>Open <code>index.html</code> and replace the <code>firebaseConfig</code> placeholder near the top of the script with your own Firebase project's config. See <code>SETUP.md</code> for the step-by-step guide (takes about 5 minutes).</p>
+  </div>
+</div>
+
+<script type="module">
+/* ============================================================
+   1. CONFIGURATION — EDIT THESE TWO BLOCKS
+   ============================================================ */
+
+// Your Google Maps JavaScript API key
+const GOOGLE_MAPS_API_KEY = "AIzaSyAmDZ9clxuxRA5EUesd7EL3oe50kC2hOH8";
+
+// Paste your Firebase web app config here (see SETUP.md)
+const firebaseConfig = {
+  apiKey: "PASTE_YOUR_FIREBASE_API_KEY",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project-id",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:xxxxxxxxxxxxxxxx"
+};
+
+// Initial map view (change to your area)
+const DEFAULT_CENTER = { lat: 39.8283, lng: -98.5795 }; // center of the US
+const DEFAULT_ZOOM = 5;
+
+/* ============================================================
+   2. APP CODE — no edits needed below
+   ============================================================ */
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, collection, addDoc, onSnapshot,
+  serverTimestamp, query, orderBy
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const configured = firebaseConfig.projectId !== "your-project-id";
+if (!configured) {
+  document.getElementById("configWarning").style.display = "flex";
+}
+
+let db = null;
+if (configured) {
+  const fbApp = initializeApp(firebaseConfig);
+  db = getFirestore(fbApp);
+}
+
+let map;
+let reporting = false;          // true while user is picking a location
+let pendingLatLng = null;       // location chosen for the report in progress
+let pendingPhoto = null;        // compressed data URL
+let infoWindow;
+const markers = new Map();      // docId -> google.maps.Marker
+
+const $ = (id) => document.getElementById(id);
+
+function toast(msg, ms = 2600) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => (t.style.display = "none"), ms);
+}
+
+/* ---------- Google Maps loading ---------- */
+window.initMap = function () {
+  map = new google.maps.Map($("map"), {
+    center: DEFAULT_CENTER,
+    zoom: DEFAULT_ZOOM,
+    streetViewControl: true,
+    mapTypeControl: true,
+    fullscreenControl: false,
+    clickableIcons: false,
+  });
+
+  infoWindow = new google.maps.InfoWindow();
+
+  map.addListener("click", (e) => {
+    if (!reporting) return;
+    pendingLatLng = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+    openModal();
+  });
+
+  // Try to center on the user's location
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        map.setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        map.setZoom(13);
+      },
+      () => {} // ignore denial
+    );
+  }
+
+  if (db) subscribeToReports();
+};
+
+const gmScript = document.createElement("script");
+gmScript.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=initMap`;
+gmScript.async = true;
+document.head.appendChild(gmScript);
+
+/* ---------- Report mode ---------- */
+$("reportBtn").addEventListener("click", () => {
+  reporting = !reporting;
+  $("reportBtn").classList.toggle("active", reporting);
+  $("reportBtn").textContent = reporting ? "Cancel reporting" : "+ Report a guardrail";
+  $("banner").style.display = reporting ? "block" : "none";
+  if (map) map.setOptions({ draggableCursor: reporting ? "crosshair" : null });
+});
+
+/* ---------- Modal ---------- */
+function openModal() {
+  pendingPhoto = null;
+  $("photoDrop").innerHTML = 'Click to add a photo<br><span style="font-size:11px">(it will be compressed automatically)</span>';
+  $("saveBtn").disabled = true;
+  $("modalCoords").textContent =
+    `Location: ${pendingLatLng.lat.toFixed(5)}, ${pendingLatLng.lng.toFixed(5)}`;
+  $("overlay").classList.add("open");
+}
+
+function closeModal() {
+  $("overlay").classList.remove("open");
+}
+
+$("cancelBtn").addEventListener("click", closeModal);
+$("overlay").addEventListener("click", (e) => {
+  if (e.target === $("overlay")) closeModal();
+});
+
+$("photoDrop").addEventListener("click", () => $("photoInput").click());
+
+$("photoInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    pendingPhoto = await compressImage(file);
+    $("photoDrop").innerHTML = "";
+    const img = document.createElement("img");
+    img.src = pendingPhoto;
+    $("photoDrop").appendChild(img);
+    $("saveBtn").disabled = false;
+  } catch (err) {
+    console.error(err);
+    toast("Could not read that image — try another one.");
+  }
+  e.target.value = "";
+});
+
+/* Compress to fit comfortably inside Firestore's 1 MB document limit */
+function compressImage(file, maxDim = 900) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // Step quality down until under ~650 KB
+      let quality = 0.8;
+      let dataUrl = canvas.toDataURL("image/jpeg", quality);
+      while (dataUrl.length > 650_000 && quality > 0.3) {
+        quality -= 0.1;
+        dataUrl = canvas.toDataURL("image/jpeg", quality);
+      }
+      URL.revokeObjectURL(img.src);
+      if (dataUrl.length > 900_000) {
+        reject(new Error("Image too large even after compression"));
+      } else {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => reject(new Error("Invalid image"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/* ---------- Save report ---------- */
+$("saveBtn").addEventListener("click", async () => {
+  if (!db) { toast("Firebase isn't configured yet — see SETUP.md"); return; }
+  if (!pendingLatLng || !pendingPhoto) return;
+
+  $("saveBtn").disabled = true;
+  $("saveBtn").textContent = "Saving…";
+  try {
+    await addDoc(collection(db, "guardrails"), {
+      lat: pendingLatLng.lat,
+      lng: pendingLatLng.lng,
+      photo: pendingPhoto,
+      createdAt: serverTimestamp(),
+    });
+    closeModal();
+    toast("Report submitted. Thank you!");
+    // exit reporting mode
+    reporting = false;
+    $("reportBtn").classList.remove("active");
+    $("reportBtn").textContent = "+ Report a guardrail";
+    $("banner").style.display = "none";
+    map.setOptions({ draggableCursor: null });
+  } catch (err) {
+    console.error(err);
+    toast("Failed to save — check your connection and Firestore rules.");
+  } finally {
+    $("saveBtn").textContent = "Submit report";
+    $("saveBtn").disabled = false;
+  }
+});
+
+/* ---------- Live markers from Firestore ---------- */
+function subscribeToReports() {
+  const q = query(collection(db, "guardrails"), orderBy("createdAt", "desc"));
+  onSnapshot(q, (snap) => {
+    snap.docChanges().forEach((change) => {
+      const id = change.doc.id;
+      if (change.type === "removed") {
+        markers.get(id)?.setMap(null);
+        markers.delete(id);
+        return;
+      }
+      if (markers.has(id)) return; // already shown
+      const d = change.doc.data();
+      const marker = new google.maps.Marker({
+        position: { lat: d.lat, lng: d.lng },
+        map,
+        title: "Dangerous guardrail",
+        icon: {
+          path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+          scale: 6,
+          fillColor: "#d93025",
+          fillOpacity: 1,
+          strokeColor: "#7a140d",
+          strokeWeight: 1.5,
+        },
+      });
+      marker.addListener("click", () => {
+        const when = d.createdAt?.toDate
+          ? d.createdAt.toDate().toLocaleDateString()
+          : "";
+        const div = document.createElement("div");
+        div.className = "iw";
+        div.innerHTML =
+          '<div class="title">&#9888;&#65039; Dangerous guardrail</div>' +
+          (d.photo ? '<img alt="Guardrail photo">' : "") +
+          `<div class="meta">${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}${when ? " · reported " + when : ""}</div>`;
+        if (d.photo) div.querySelector("img").src = d.photo;
+        infoWindow.setContent(div);
+        infoWindow.open(map, marker);
+      });
+      markers.set(id, marker);
+    });
+  }, (err) => {
+    console.error(err);
+    toast("Couldn't load reports — check Firestore rules (see SETUP.md).");
+  });
+}
+</script>
+</body>
+</html>
